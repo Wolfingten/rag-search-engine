@@ -1,6 +1,12 @@
 import argparse
 
-from utils import search_command, InvertedIndex, BM25_K1, BM25_B
+from lib.keyword_search import (
+    SEARCH_LIMIT,
+    search_command,
+    InvertedIndex,
+    BM25_K1,
+    BM25_B,
+)
 
 
 def main() -> None:
@@ -52,6 +58,15 @@ def main() -> None:
         help="Parameter to adjust document length normalization strength.",
     )
 
+    bm25search_parser = subparsers.add_parser(
+        "bm25search",
+        help="Return the top n {--limit} matches of a query {query} according to Okapi BM25 algorithm.",
+    )
+    bm25search_parser.add_argument("query", type=str, help="Search query")
+    bm25search_parser.add_argument(
+        "--limit", type=int, default=SEARCH_LIMIT, help="Search result limit"
+    )
+
     subparsers.add_parser(
         "build", help="Build the inverted index database and save it to disk"
     )
@@ -62,6 +77,13 @@ def main() -> None:
     args = parser.parse_args()
 
     match args.command:
+        case "bm25search":
+            index = InvertedIndex()
+            index.load()
+            bm25search = index.bm25_search(args.query, args.limit)
+            for result in bm25search:
+                title = index.docmap[result[0]]["title"]
+                print(f"({result[0]}) {title} - Score: {result[1]:.2f})")
         case "bm25tf":
             index = InvertedIndex()
             index.load()
