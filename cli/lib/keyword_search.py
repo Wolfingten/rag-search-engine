@@ -1,27 +1,25 @@
-import os
-import json
-from string import punctuation
-import pickle
-from collections import Counter, defaultdict
 import math
+import os
+import pickle
+from string import punctuation
+from collections import Counter, defaultdict
 
 from nltk.stem import PorterStemmer
+
+from .utils import PROJECT_ROOT, CACHE_PATH, load_data
 
 SEARCH_LIMIT = 5
 BM25_K1 = 1.5
 BM25_B = 0.75
 
-MODULE_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-DATA_PATH = os.path.join(MODULE_ROOT, "data", "movies.json")
-STOPWORDS_PATH = os.path.join(MODULE_ROOT, "data", "stopwords.txt")
-CACHE_PATH = os.path.join(MODULE_ROOT, "cache")
+STOPWORDS_PATH = os.path.join(PROJECT_ROOT, "data", "stopwords.txt")
 
 
 def search_command(query: str, limit: int = SEARCH_LIMIT) -> list[dict]:
     index = InvertedIndex()
     index.load()
     seen, result = set(), []
-    processed_query = preprocess(query)
+    processed_query = tokenize(query)
     for q in processed_query:
         matches = index.get_documents(q)
         for i in matches:
@@ -34,24 +32,13 @@ def search_command(query: str, limit: int = SEARCH_LIMIT) -> list[dict]:
     return result
 
 
-def load_data() -> dict:
-    print(DATA_PATH)
-    with open(
-        DATA_PATH,
-        "r",
-        encoding="utf8",
-    ) as f:
-        data = json.load(f)
-    return data
-
-
 def load_stopwords() -> list[str]:
     with open(STOPWORDS_PATH, "r", encoding="utf8") as f:
         stopwords = f.read()
     return stopwords.splitlines()
 
 
-def preprocess(text: str) -> list[str]:
+def tokenize(text: str) -> list[str]:
     stopwords = load_stopwords()
     stemmer = PorterStemmer()
     text = text.lower()
@@ -83,12 +70,12 @@ class InvertedIndex:
         self.doc_lengths: dict[int, int] = {}
         self.doc_length_path = os.path.join(CACHE_PATH, "doc_lengths.pkl")
 
-    def __add_document(self, doc_id: int, text: str):
-        texts = preprocess(text)
-        for t in set(texts):
+    def __add_document(self, doc_id: int, text: str) -> None:
+        tokens = tokenize(text)
+        for t in set(tokens):
             self.index[t].add(doc_id)
-        self.term_frequencies[doc_id].update(texts)
-        self.doc_lengths[doc_id] = len(texts)
+        self.term_frequencies[doc_id].update(tokens)
+        self.doc_lengths[doc_id] = len(tokens)
 
     def __get_avg_doc_length(self) -> float:
         if self.doc_lengths:
@@ -96,21 +83,21 @@ class InvertedIndex:
         return 0.0
 
     def get_documents(self, term: str) -> list[int]:
-        tokens = preprocess(term)
+        tokens = tokenize(term)
         if len(tokens) != 1:
             raise ValueError("term must be a single token")
         token = tokens[0]
         return sorted(list(self.index.get(token, set())))
 
     def get_tf(self, doc_id: int, term: str) -> int:
-        tokens = preprocess(term)
+        tokens = tokenize(term)
         if len(tokens) != 1:
             raise ValueError("term must be a single token")
         token = tokens[0]
         return self.term_frequencies[doc_id][token]
 
     def get_idf(self, term: str) -> float:
-        tokens = preprocess(term)
+        tokens = tokenize(term)
         if len(tokens) != 1:
             raise ValueError("term must be a single token")
         token = tokens[0]
@@ -119,12 +106,8 @@ class InvertedIndex:
         return math.log((n_total + 1) / (n_matches + 1))
 
     def get_tfidf(self, doc_id: int, term: str) -> float:
-        tokens = preprocess(term)
-        if len(tokens) != 1:
-            raise ValueError("term must be a single token")
-        token = tokens[0]
-        tf = self.get_tf(doc_id, token)
-        idf = self.get_idf(token)
+        tf = self.get_tf(doc_id, term)
+        idf = self.get_idf(term)
         return tf * idf
 
     def get_bm25_tf(
@@ -137,27 +120,36 @@ class InvertedIndex:
         return (tf * (k1 + 1)) / (tf + k1 * length_norm)
 
     def get_bm25_idf(self, term: str) -> float:
-        tokens = preprocess(term)
-        if len(tokens) != 1:
-            raise ValueError("term must be a single token")
-        token = tokens[0]
         n_total = len(self.docmap)
-        n_matches = len(self.get_documents(token))
+        n_matches = len(self.get_documents(term))
         return math.log((n_total - n_matches + 0.5) / (n_matches + 0.5) + 1)
 
     def bm25(self, doc_id: int, term: str) -> float:
         return self.get_bm25_tf(doc_id, term) * self.get_bm25_idf(term)
 
     def bm25_search(self, query: str, limit: int = SEARCH_LIMIT) -> list:
-        tokens = preprocess(query)
-        score = {}
-        for id, _ in self.docmap.items():
+        tokens = tokenize(query)
+
+        scores = {}
+        for d_id in self.docmap:
             total_score = 0
             for t in tokens:
-                total_score += self.bm25(id, t)
-            score[id] = total_score
-        score = sorted(score.items(), key=lambda item: item[1], reverse=True)
-        return score[:limit]
+                total_score += self.bm25(d_id, t)
+            scores[d_id] = total_score
+        scores = sorted(scores.items(), key=lambda item: item[1], reverse=True)
+
+        results = []
+        for i, score in scores[:limit]:
+            d = self.docmap[i]
+            results.append(
+                {
+                    "id": d["id"],
+                    "title": d["title"],
+                    "document": d["description"],
+                    "score": score,
+                }
+            )
+        return results
 
     def build(self):
         data = load_data()

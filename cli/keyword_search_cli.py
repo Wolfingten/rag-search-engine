@@ -83,7 +83,7 @@ def main() -> None:
             bm25search = index.bm25_search(args.query, args.limit)
             for result in bm25search:
                 title = index.docmap[result[0]]["title"]
-                print(f"({result[0]}) {title} - Score: {result[1]:.2f})")
+                print(f"({result[0]}) {title} - (Score: {result[1]:.2f})")
         case "bm25tf":
             index = InvertedIndex()
             index.load()
