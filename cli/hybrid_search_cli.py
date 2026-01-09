@@ -1,9 +1,11 @@
 import argparse
 
-from torch import norm
-
 from lib.utils import load_data
-from lib.hybrid_search import normalize, HybridSearch
+from lib.hybrid_search import min_max_normalize, HybridSearch
+from lib.query_enhancement import (
+    enhance_query,
+    rerank_results,
+)
 
 
 def main() -> None:
@@ -45,21 +47,28 @@ def main() -> None:
         help="Parameter to control influence of high and low ranked results.",
     )
     rrf_search_parser.add_argument(
-        "--limit", type=int, help="Number of search results returned"
+        "--limit", type=int, default=5, help="Number of search results returned"
+    )
+    rrf_search_parser.add_argument(
+        "--enhance",
+        type=str,
+        choices=["spell", "rewrite", "expand"],
+        help="Query enhancement method",
+    )
+    rrf_search_parser.add_argument(
+        "--rerank-method",
+        type=str,
+        choices=["individual", "batch", "cross_encoder"],
+        help="Method to rerank most relevant search results.",
     )
 
     args = parser.parse_args()
 
     match args.command:
         case "rrf-search":
-            documents = load_data()
-            index = HybridSearch(documents["movies"])
-            results = index.rrf_search(args.query, args.k, args.limit)
-            for i, r in enumerate(results, 1):
-                r = r[1]
-                print(
-                    f"{i}. {r["title"]}\n\tRRF Score: {r["rrf_score"]}\n\tBM25: {r["bm25_rank"]}, Semantic: {r["semantic_rank"]}\n\t{r["document"][:100]}"
-                )
+            rrf_search_command(
+                args.query, args.enhance, args.rerank_method, args.k, args.limit
+            )
         case "weighted-search":
             documents = load_data()
             index = HybridSearch(documents["movies"])
@@ -70,9 +79,27 @@ def main() -> None:
                     f"{i}. {r["title"]}\n\tHybrid Score: {r["hybrid_score"]}\n\tBM25: {r["bm25_score"]}, Semantic: {r["semantic_score"]}\n\t{r["document"][:100]}"
                 )
         case "normalize":
-            print(normalize(args.array))
+            print(min_max_normalize(args.array))
         case _:
             parser.print_help()
+
+
+def rrf_search_command(
+    query: str, enhance: str = "", rerank_method: str = "", k=60, limit=5
+):
+    query = enhance_query(query, method=enhance)
+    documents = load_data()
+    index = HybridSearch(documents["movies"])
+
+    print(f"Reciprocal Rank Fusion Results for '{query}' (k={k}):")
+    if rerank_method:
+        results = index.rrf_search(query, k, limit * 5)
+        print(f"Reranking top {limit} results using {rerank_method} method...")
+
+        results = rerank_results(query, results, method=rerank_method, limit=limit)
+
+    results = index.rrf_search(query, k, limit)
+    return results
 
 
 if __name__ == "__main__":

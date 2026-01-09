@@ -13,3 +13,6 @@ wheels/
 # Data and cache dirs
 /data/
 /cache/
+
+# Environment file
+.env
