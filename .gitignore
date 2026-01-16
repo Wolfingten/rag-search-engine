@@ -11,7 +11,7 @@ wheels/
 .direnv
 
 # Data and cache dirs
-/data/
+movies.json
 /cache/
 
 # Environment file
